@@ -2,28 +2,33 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 
 function App() {
-  const [data, setData] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [newItem, setNewItem] = useState('');
+  const [newTitle, setNewTitle] = useState('');
+  const [newDueDate, setNewDueDate] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [editingId, setEditingId] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDueDate, setEditDueDate] = useState('');
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    fetchTasks();
+  }, [filter]);
 
-  const fetchData = async () => {
+  const fetchTasks = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/items');
+      const params = filter !== 'all' ? `?status=${filter}` : '';
+      const response = await fetch(`/api/items${params}`);
       if (!response.ok) {
         throw new Error('Network response was not ok');
       }
       const result = await response.json();
-      setData(result);
+      setTasks(result);
       setError(null);
     } catch (err) {
       setError('Failed to fetch data: ' + err.message);
-      console.error('Error fetching data:', err);
     } finally {
       setLoading(false);
     }
@@ -31,46 +36,103 @@ function App() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!newItem.trim()) return;
+    if (!newTitle.trim()) return;
 
     try {
       const response = await fetch('/api/items', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name: newItem }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newTitle,
+          due_date: newDueDate || null
+        }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to add item');
+        throw new Error('Failed to add task');
       }
 
-      const result = await response.json();
-      setData([...data, result]);
-      setNewItem('');
+      setNewTitle('');
+      setNewDueDate('');
+      await fetchTasks();
     } catch (err) {
-      setError('Error adding item: ' + err.message);
-      console.error('Error adding item:', err);
+      setError('Error adding task: ' + err.message);
     }
   };
 
-  const handleDelete = async (itemId) => {
+  const handleToggle = async (id) => {
     try {
-      const response = await fetch(`/api/items/${itemId}`, {
+      const response = await fetch(`/api/items/${id}/toggle`, {
+        method: 'PATCH',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to toggle task');
+      }
+
+      await fetchTasks();
+    } catch (err) {
+      setError('Error toggling task: ' + err.message);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    try {
+      const response = await fetch(`/api/items/${id}`, {
         method: 'DELETE',
       });
 
       if (!response.ok) {
-        throw new Error('Failed to delete item');
+        throw new Error('Failed to delete task');
       }
 
-      setData(data.filter(item => item.id !== itemId));
-      setError(null);
+      await fetchTasks();
     } catch (err) {
-      setError('Error deleting item: ' + err.message);
-      console.error('Error deleting item:', err);
+      setError('Error deleting task: ' + err.message);
     }
+  };
+
+  const startEditing = (task) => {
+    setEditingId(task.id);
+    setEditTitle(task.name);
+    setEditDueDate(task.due_date || '');
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditTitle('');
+    setEditDueDate('');
+  };
+
+  const handleSaveEdit = async (id) => {
+    if (!editTitle.trim()) return;
+
+    try {
+      const response = await fetch(`/api/items/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editTitle,
+          due_date: editDueDate || null
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update task');
+      }
+
+      setEditingId(null);
+      setEditTitle('');
+      setEditDueDate('');
+      await fetchTasks();
+    } catch (err) {
+      setError('Error updating task: ' + err.message);
+    }
+  };
+
+  const isOverdue = (dueDate) => {
+    if (!dueDate) return false;
+    return new Date(dueDate) < new Date(new Date().toDateString());
   };
 
   return (
@@ -82,39 +144,103 @@ function App() {
 
       <main>
         <section className="add-item-section">
-          <h2>Add New Item</h2>
+          <h2>Add New Task</h2>
           <form onSubmit={handleSubmit}>
             <input
               type="text"
-              value={newItem}
-              onChange={(e) => setNewItem(e.target.value)}
-              placeholder="Enter item name"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="Enter task title"
+              aria-label="Task title"
             />
-            <button type="submit">Add Item</button>
+            <input
+              type="date"
+              value={newDueDate}
+              onChange={(e) => setNewDueDate(e.target.value)}
+              aria-label="Due date"
+            />
+            <button type="submit">Add Task</button>
           </form>
         </section>
 
+        <section className="filter-section">
+          <h2>Filter</h2>
+          <div className="filter-buttons">
+            <button
+              className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
+              onClick={() => setFilter('all')}
+            >
+              All
+            </button>
+            <button
+              className={`filter-btn ${filter === 'active' ? 'active' : ''}`}
+              onClick={() => setFilter('active')}
+            >
+              Active
+            </button>
+            <button
+              className={`filter-btn ${filter === 'completed' ? 'active' : ''}`}
+              onClick={() => setFilter('completed')}
+            >
+              Completed
+            </button>
+          </div>
+        </section>
+
         <section className="items-section">
-          <h2>Items from Database</h2>
+          <h2>Tasks</h2>
           {loading && <p>Loading data...</p>}
           {error && <p className="error">{error}</p>}
           {!loading && !error && (
             <ul>
-              {data.length > 0 ? (
-                data.map((item) => (
-                  <li key={item.id}>
-                    <span>{item.name}</span>
-                    <button 
-                      onClick={() => handleDelete(item.id)}
-                      className="delete-btn"
-                      type="button"
-                    >
-                      Delete
-                    </button>
+              {tasks.length > 0 ? (
+                tasks.map((task) => (
+                  <li key={task.id} className={task.completed ? 'completed' : ''}>
+                    {editingId === task.id ? (
+                      <div className="edit-form">
+                        <input
+                          type="text"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          aria-label="Edit task title"
+                        />
+                        <input
+                          type="date"
+                          value={editDueDate}
+                          onChange={(e) => setEditDueDate(e.target.value)}
+                          aria-label="Edit due date"
+                        />
+                        <button onClick={() => handleSaveEdit(task.id)} className="save-btn">Save</button>
+                        <button onClick={cancelEditing} className="cancel-btn">Cancel</button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="task-content">
+                          <input
+                            type="checkbox"
+                            checked={!!task.completed}
+                            onChange={() => handleToggle(task.id)}
+                            aria-label={`Mark "${task.name}" as ${task.completed ? 'incomplete' : 'complete'}`}
+                          />
+                          <span className={`task-name ${task.completed ? 'strikethrough' : ''}`}>
+                            {task.name}
+                          </span>
+                          {task.due_date && (
+                            <span className={`due-date ${isOverdue(task.due_date) && !task.completed ? 'overdue' : ''}`}>
+                              {task.due_date}
+                            </span>
+                          )}
+                        </div>
+                        <div className="task-actions">
+                          <button onClick={() => startEditing(task)} className="edit-btn">Edit</button>
+                          <button onClick={() => handleDelete(task.id)} className="delete-btn">Delete</button>
+                        </div>
+                      </>
+                    )}
                   </li>
                 ))
               ) : (
-                <p>No items found. Add some!</p>
+                <p>No tasks found. Add some!</p>
               )}
             </ul>
           )}
